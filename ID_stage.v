@@ -120,8 +120,14 @@ assign ds_ready_go    = 1'b1;
 assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin;
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 always @(posedge clk) begin
-    if (fs_to_ds_valid && ds_allowin) begin
-        fs_to_ds_bus_r <= fs_to_ds_bus;
+    if (reset) begin //bug fixed3: reset后，ds_valid置0
+        ds_valid <= 1'b0;
+    end else if (ds_allowin) begin
+        ds_valid <= fs_to_ds_valid;
+    end
+
+    if (fs_to_ds_valid && ds_allowin) begin//IF送来的数据有效，且ID允许进入
+        fs_to_ds_bus_r <= fs_to_ds_bus; //IF stage到ID stage的总线，64位
     end
 end
 

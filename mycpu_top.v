@@ -24,20 +24,20 @@ module mycpu_top(
 reg         reset;
 always @(posedge clk) reset <= ~resetn;
 
-wire         ds_allowin;
-wire         es_allowin;
-wire         ms_allowin;
-wire         ws_allowin;
-wire         fs_to_ds_valid;
-wire         ds_to_es_valid;
-wire         es_to_ms_valid;
-wire         ms_to_ws_valid;
-wire [`FS_TO_DS_BUS_WD -1:0] fs_to_ds_bus;
-wire [`DS_TO_ES_BUS_WD -1:0] ds_to_es_bus;
-wire [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus;
-wire [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus;
-wire [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus;
-wire [`BR_BUS_WD       -1:0] br_bus;
+wire         ds_allowin; //允许IF stage进入ID stage
+wire         es_allowin; //允许ID stage进入EXE stage
+wire         ms_allowin; //允许EXE stage进入MEM stage
+wire         ws_allowin; //允许MEM stage进入WB stage
+wire         fs_to_ds_valid; //IF stage到ID stage的有效信号
+wire         ds_to_es_valid; //ID stage到EXE stage的有效信号
+wire         es_to_ms_valid; //EXE stage到MEM stage的有效信号
+wire         ms_to_ws_valid; //MEM stage到WB stage的有效信号
+wire [`FS_TO_DS_BUS_WD -1:0] fs_to_ds_bus; //IF stage到ID stage的总线，64位
+wire [`DS_TO_ES_BUS_WD -1:0] ds_to_es_bus; //ID stage到EXE stage的总线，136位
+wire [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus; //EXE stage到MEM stage的总线，71位
+wire [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus; //MEM stage到WB stage的总线，70位
+wire [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus; //WB stage到RF的总线，38位
+wire [`BR_BUS_WD       -1:0] br_bus;//branch相关的总线，32位
 
 // IF stage
 if_stage if_stage(

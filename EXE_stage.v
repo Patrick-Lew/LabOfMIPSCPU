@@ -90,11 +90,11 @@ assign es_alu_src2 = es_src2_is_imm ? {{16{es_imm[15]}}, es_imm[15:0]} :
 
 alu u_alu(
     .alu_op     (es_alu_op    ),
-    .alu_src1   (es_alu_src2  ),
+    .alu_src1   (es_alu_src1  ), //bug fixed2: es_alu_src1
     .alu_src2   (es_alu_src2  ),
     .alu_result (es_alu_result)
     );
-
+// data sram interface，EXE发送，MEM执行/接收
 assign data_sram_en    = 1'b1;
 assign data_sram_wen   = es_mem_we&&es_valid ? 4'hf : 4'h0;
 assign data_sram_addr  = es_alu_result;
