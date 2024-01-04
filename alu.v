@@ -5,18 +5,18 @@ module alu(
   output [31:0] alu_result
 );
 
-wire op_add;   //¼Ó·¨²Ù×÷
-wire op_sub;   //¼õ·¨²Ù×÷
-wire op_slt;   //ÓÐ·ûºÅ±È½Ï£¬Ð¡ÓÚÖÃÎ»
-wire op_sltu;  //ÎÞ·ûºÅ±È½Ï£¬Ð¡ÓÚÖÃÎ»
-wire op_and;   //°´Î»Óë
-wire op_nor;   //°´Î»»ò·Ç
-wire op_or;    //°´Î»»ò
-wire op_xor;   //°´Î»Òì»ò
-wire op_sll;   //Âß¼­×óÒÆ
-wire op_srl;   //Âß¼­ÓÒÒÆ
-wire op_sra;   //ËãÊõÓÒÒÆ
-wire op_lui;   //Á¢¼´ÊýÖÃÓÚ¸ß°ë²¿·Ö
+wire op_add;   //ï¿½Ó·ï¿½ï¿½ï¿½ï¿½ï¿½
+wire op_sub;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+wire op_slt;   //ï¿½Ð·ï¿½ï¿½Å±È½Ï£ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½Î»
+wire op_sltu;  //ï¿½Þ·ï¿½ï¿½Å±È½Ï£ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½Î»
+wire op_and;   //ï¿½ï¿½Î»ï¿½ï¿½
+wire op_nor;   //ï¿½ï¿½Î»ï¿½ï¿½ï¿½
+wire op_or;    //ï¿½ï¿½Î»ï¿½ï¿½
+wire op_xor;   //ï¿½ï¿½Î»ï¿½ï¿½ï¿½
+wire op_sll;   //ï¿½ß¼ï¿½ï¿½ï¿½ï¿½ï¿½
+wire op_srl;   //ï¿½ß¼ï¿½ï¿½ï¿½ï¿½ï¿½
+wire op_sra;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+wire op_lui;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¸ß°ë²¿ï¿½ï¿½
 
 // control code decomposition
 assign op_add  = alu_op[ 0];
@@ -71,7 +71,7 @@ assign sltu_result[0]    = ~adder_cout;
 
 // bitwise operation
 assign and_result = alu_src1 & alu_src2;
-assign or_result  = alu_src1 | alu_src2 | alu_result;
+assign or_result  = alu_src1 | alu_src2; // | alu_result; bug fixed6: or_result = alu_src1 | alu_src2
 assign nor_result = ~or_result;
 assign xor_result = alu_src1 ^ alu_src2;
 assign lui_result = {alu_src2[15:0], 16'b0};
@@ -82,7 +82,8 @@ assign sll_result = alu_src2 << alu_src1[4:0];
 // SRL, SRA result
 assign sr64_result = {{32{op_sra & alu_src2[31]}}, alu_src2[31:0]} >> alu_src1[4:0];
 
-assign sr_result   = sr64_result[30:0];
+assign sr_result   = sr64_result[31:0]; //bug fixed7: sr_result = sr64_result[31:0];
+//all bugs fixed, Done
 
 // final result mux
 assign alu_result = ({32{op_add|op_sub}} & add_sub_result)

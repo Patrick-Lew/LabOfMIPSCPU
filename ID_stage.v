@@ -180,6 +180,7 @@ assign alu_op[ 9] = inst_srl;
 assign alu_op[10] = inst_sra;
 assign alu_op[11] = inst_lui;
 
+assign load_op      = inst_lw;//bug fixed4: load_op只有lw指令才为1
 assign src1_is_sa   = inst_sll   | inst_srl | inst_sra;
 assign src1_is_pc   = inst_jal;
 assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_sw;
