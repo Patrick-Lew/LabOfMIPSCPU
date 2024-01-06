@@ -22,21 +22,26 @@ reg         fs_valid; //IF stage的有效信号
 wire        fs_ready_go;
 wire        fs_allowin;
 wire        to_fs_valid;
+wire        ready_go;//pre-IF stage的ready信号, ADD：新增ready_go 
 
 wire [31:0] seq_pc; //顺序执行的PC
 wire [31:0] nextpc; //下一个PC
 
+wire         br_stall; //是否暂停, ADD：新增br_stall
 wire         br_taken; //是否跳转
 wire [ 31:0] br_target; //跳转目标
-assign {br_taken,br_target} = br_bus;
+assign {br_stall, br_taken,br_target} = br_bus; //ADD：新增br_stall
 
 wire [31:0] fs_inst; //IF stage的指令
 reg  [31:0] fs_pc; //IF stage的PC
 assign fs_to_ds_bus = {fs_inst ,
                        fs_pc   }; //IF stage到ID stage的总线，64位
 
+reg start;
+
 // pre-IF stage
-assign to_fs_valid  = ~reset; //进入IF stage的有效信号
+assign ready_go     = ~br_stall; //pre-IF stage的ready信号
+assign to_fs_valid  = ~reset && ready_go; //进入IF stage的有效信号, ADD：新增ready_go
 assign seq_pc       = fs_pc + 3'h4; //顺序执行的PC
 assign nextpc       = br_taken ? br_target : seq_pc; //下一个PC
 
@@ -56,11 +61,12 @@ always @(posedge clk) begin
         fs_pc <= 32'hbfbffffc;  //trick: to make nextpc be 0xbfc00000 during reset 
     end
     else if (to_fs_valid && fs_allowin) begin //允许进入，reset结束后可以直接进入
+    //to_fs_valid 因为br_stall的存在，这里不会被更新，分支延迟槽的指令锁在IF stage的fs_pc寄存器中
         fs_pc <= nextpc;
     end
 end
 
-assign inst_sram_en    = to_fs_valid && fs_allowin;//pre-IF阶段就送入了
+assign inst_sram_en    = to_fs_valid && fs_allowin;//pre-IF阶段就送入了，这里也会被br_stall置于0
 assign inst_sram_wen   = 4'h0;
 assign inst_sram_addr  = nextpc;//pre-IF阶段送入的PC
 assign inst_sram_wdata = 32'b0;

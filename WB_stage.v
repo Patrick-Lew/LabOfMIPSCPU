@@ -34,10 +34,10 @@ assign {ws_gr_we       ,  //69:69
 wire        rf_we;
 wire [4 :0] rf_waddr;
 wire [31:0] rf_wdata;
-assign ws_to_rf_bus = {rf_we   ,  //37:37
+assign ws_to_rf_bus = ws_valid ? {rf_we   ,  //37:37
                        rf_waddr,  //36:32
                        rf_wdata   //31:0
-                      };
+                      }:0;
 
 assign ws_ready_go = 1'b1;
 assign ws_allowin  = !ws_valid || ws_ready_go;

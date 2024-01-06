@@ -15,7 +15,10 @@ module id_stage(
     //to fs
     output [`BR_BUS_WD       -1:0] br_bus        ,
     //to rf: for write back
-    input  [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus
+    input  [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus  ,
+    //bypass input
+    input  [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus  ,
+    input  [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus
 );
 
 reg         ds_valid   ;
@@ -38,6 +41,7 @@ assign {rf_we   ,  //37:37
         rf_wdata   //31:0
        } = ws_to_rf_bus;
 
+wire        br_stall; //ADD：新增br_stall
 wire        br_taken;
 wire [31:0] br_target;
 
@@ -99,7 +103,40 @@ wire [31:0] rf_rdata2;
 
 wire        rs_eq_rt;
 
-assign br_bus       = {br_taken,br_target};
+//bypass 
+wire es_res_from_mem;
+wire es_gr_we;
+wire [ 4:0] es_dest;
+wire [31:0] es_alu_result;
+
+assign es_res_from_mem = es_to_ms_bus[70];
+assign es_gr_we        = es_to_ms_bus[69];
+assign es_dest         = es_to_ms_bus[68:64];
+assign es_alu_result   = es_to_ms_bus[63:32];
+
+wire ms_gr_we;
+wire [ 4:0] ms_dest;
+wire [31:0] ms_final_result;
+
+assign ms_gr_we        = ms_to_ws_bus[69];
+assign ms_dest         = ms_to_ws_bus[68:64];
+assign ms_final_result = ms_to_ws_bus[63:32];
+
+// wire        rf_we   ;
+// wire [ 4:0] rf_waddr;
+// wire [31:0] rf_wdata;
+
+
+wire is_i_instr;
+wire is_r_instr;
+wire is_j_instr;//is_j_instr单独处理
+
+assign is_i_instr = op[5:3] == 3'b001;
+assign is_r_instr = op[5:0] == 6'b000000;
+
+
+assign br_bus       = {br_stall,br_taken,br_target};
+
 
 assign ds_to_es_bus = {alu_op      ,  //135:124
                        load_op     ,  //123:123
@@ -116,12 +153,16 @@ assign ds_to_es_bus = {alu_op      ,  //135:124
                        ds_pc          //31 :0
                       };
 
-assign ds_ready_go    = 1'b1;
-assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin;
+assign ds_ready_go    = fs_to_ds_bus_r==0 ? 1 : !(
+                         (es_res_from_mem && is_r_instr && (es_dest==rs || es_dest == rt))
+                        || (es_res_from_mem && is_i_instr && es_dest==rs)
+                        );
+assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin; //用assign连线保证所有的逐渐互锁在一个周期内完成
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 always @(posedge clk) begin
     if (reset) begin //bug fixed3: reset后，ds_valid置0
         ds_valid <= 1'b0;
+        fs_to_ds_bus_r <= 0;
     end else if (ds_allowin) begin
         ds_valid <= fs_to_ds_valid;
     end
@@ -208,8 +249,15 @@ regfile u_regfile(
     .wdata  (rf_wdata )
     );
 
-assign rs_value = rf_rdata1;
-assign rt_value = rf_rdata2;
+assign rs_value = (rf_raddr1==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_result :
+(rf_raddr1==ms_dest && ms_gr_we)? ms_final_result :
+(rf_raddr1==rf_waddr && rf_we)? rf_wdata : rf_rdata1;
+
+assign rt_value = (rf_raddr2==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_result :
+(rf_raddr2==ms_dest && ms_gr_we)? ms_final_result :
+(rf_raddr2==rf_waddr && rf_we)? rf_wdata : rf_rdata2;
+
+
 
 assign rs_eq_rt = (rs_value == rt_value);
 assign br_taken = (   inst_beq  &&  rs_eq_rt
@@ -220,5 +268,6 @@ assign br_taken = (   inst_beq  &&  rs_eq_rt
 assign br_target = (inst_beq || inst_bne) ? (fs_pc + {{14{imm[15]}}, imm[15:0], 2'b0}) :
                    (inst_jr)              ? rs_value :
                   /*inst_jal*/              {fs_pc[31:28], jidx[25:0], 2'b0};
+assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && inst_beq && inst_bne) || (es_res_from_mem && es_dest == rs && inst_jr); 
 
 endmodule

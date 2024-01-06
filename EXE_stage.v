@@ -58,12 +58,12 @@ wire [31:0] es_alu_result ;
 wire        es_res_from_mem;
 
 assign es_res_from_mem = es_load_op;
-assign es_to_ms_bus = {es_res_from_mem,  //70:70
+assign es_to_ms_bus = es_to_ms_valid ? {es_res_from_mem,  //70:70
                        es_gr_we       ,  //69:69
                        es_dest        ,  //68:64
                        es_alu_result  ,  //63:32
                        es_pc             //31:0
-                      };
+                      } : 0;
 
 assign es_ready_go    = 1'b1;
 assign es_allowin     = !es_valid || es_ready_go && ms_allowin;

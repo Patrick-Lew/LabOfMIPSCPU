@@ -73,7 +73,10 @@ id_stage id_stage(
     //to fs
     .br_bus         (br_bus         ),
     //to rf: for write back
-    .ws_to_rf_bus   (ws_to_rf_bus   )
+    .ws_to_rf_bus   (ws_to_rf_bus   ),
+    //bypass input
+    .es_to_ms_bus   (es_to_ms_bus   ),
+    .ms_to_ws_bus   (ms_to_ws_bus   )
 );
 // EXE stage
 exe_stage exe_stage(

@@ -35,11 +35,11 @@ assign {ms_res_from_mem,  //70:70
 wire [31:0] mem_result;
 wire [31:0] ms_final_result;
 
-assign ms_to_ws_bus = {ms_gr_we       ,  //69:69
+assign ms_to_ws_bus = ms_to_ws_valid ? {ms_gr_we       ,  //69:69
                        ms_dest        ,  //68:64
                        ms_final_result,  //63:32
                        ms_pc             //31:0
-                      };
+                      } : 0;
 
 assign ms_ready_go    = 1'b1;
 assign ms_allowin     = !ms_valid || ms_ready_go && ws_allowin;
