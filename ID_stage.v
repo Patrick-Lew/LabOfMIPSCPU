@@ -45,11 +45,12 @@ wire        br_stall; //ADD：新增br_stall
 wire        br_taken;
 wire [31:0] br_target;
 
-wire [11:0] alu_op;
+wire [31:0] alu_op; //ADD：拓宽到32位
 wire        load_op;
 wire        src1_is_sa;
 wire        src1_is_pc;
 wire        src2_is_imm;
+wire        src2_is_zero_extended_imm;//第二个操作数是低16位0拓展至32位
 wire        src2_is_8;
 wire        res_from_mem;
 wire        gr_we;
@@ -102,6 +103,8 @@ wire [ 4:0] rf_raddr2;
 wire [31:0] rf_rdata2;
 
 wire        rs_eq_rt;
+wire        rs_ge_rt;
+wire        rs_gt_rt;
 
 //bypass 
 wire es_res_from_mem;
@@ -138,11 +141,12 @@ assign is_r_instr = op[5:0] == 6'b000000;
 assign br_bus       = {br_stall,br_taken,br_target};
 
 
-assign ds_to_es_bus = {alu_op      ,  //135:124
-                       load_op     ,  //123:123
-                       src1_is_sa  ,  //122:122
-                       src1_is_pc  ,  //121:121
-                       src2_is_imm ,  //120:120
+assign ds_to_es_bus = {alu_op      ,  //156:125
+                       load_op     ,  //124:124
+                       src1_is_sa  ,  //123:123
+                       src1_is_pc  ,  //122:122
+                       src2_is_imm ,  //121:121
+                       src2_is_zero_extended_imm,//120:120
                        src2_is_8   ,  //119:119
                        gr_we       ,  //118:118
                        mem_we      ,  //117:117
@@ -188,6 +192,106 @@ decoder_5_32 u_dec3(.in(rt  ), .out(rt_d  ));
 decoder_5_32 u_dec4(.in(rd  ), .out(rd_d  ));
 decoder_5_32 u_dec5(.in(sa  ), .out(sa_d  ));
 
+//------------------添加新的运算类指令------------------
+wire inst_add;
+wire inst_addi;
+wire inst_sub;
+
+wire inst_slti;
+wire inst_sltiu;
+
+wire inst_andi;
+wire inst_ori;
+wire inst_xori;
+
+wire inst_sllv;
+wire inst_srlv;
+wire inst_srav;
+
+wire inst_mult;
+wire inst_multu;
+wire inst_div;
+wire inst_divu;
+
+wire inst_mfhi;
+wire inst_mflo;
+wire inst_mthi;
+wire inst_mtlo;
+
+
+
+assign inst_add    = op_d[6'h00] & func_d[6'h20] & sa_d[5'h00];
+assign inst_addi   = op_d[6'h08];
+assign inst_sub    = op_d[6'h00] & func_d[6'h22] & sa_d[5'h00];//这三条暂不考虑溢出
+
+assign inst_slti   = op_d[6'h0a]; 
+assign inst_sltiu  = op_d[6'h0b];
+
+assign inst_andi   = op_d[6'h0c];
+assign inst_ori    = op_d[6'h0d];
+assign inst_xori   = op_d[6'h0e];
+
+assign inst_sllv   = op_d[6'h00] & func_d[6'h04] & sa_d[5'h00];
+assign inst_srlv   = op_d[6'h00] & func_d[6'h06] & sa_d[5'h00];
+assign inst_srav   = op_d[6'h00] & func_d[6'h07] & sa_d[5'h00];
+
+assign inst_mult   = op_d[6'h00] & func_d[6'h18] & sa_d[5'h00] & rd_d[5'h00];
+assign inst_multu  = op_d[6'h00] & func_d[6'h19] & sa_d[5'h00] & rd_d[5'h00];
+assign inst_div    = op_d[6'h00] & func_d[6'h1a] & sa_d[5'h00] & rd_d[5'h00];
+assign inst_divu   = op_d[6'h00] & func_d[6'h1b] & sa_d[5'h00] & rd_d[5'h00];
+
+assign inst_mfhi   = op_d[6'h00] & func_d[6'h10] & rt_d[5'h00] & rs_d[5'h00] & sa_d[5'h00];
+assign inst_mflo   = op_d[6'h00] & func_d[6'h12] & rt_d[5'h00] & rs_d[5'h00] & sa_d[5'h00];
+assign inst_mthi   = op_d[6'h00] & func_d[6'h11] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
+assign inst_mtlo   = op_d[6'h00] & func_d[6'h13] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
+
+//------------------添加新的运算类指令------------------
+
+//------------------添加新的转移和访存类指令------------------
+wire inst_bgez;
+wire inst_bgtz;
+wire inst_blez;
+wire inst_bltz;
+
+wire inst_j;
+
+wire inst_bltzal;
+wire inst_bgezal;
+
+wire inst_jalr;
+
+wire inst_lb;
+wire inst_lbu;
+wire inst_lh;
+wire inst_lhu;
+
+wire inst_sb;
+wire inst_sh;
+
+wire inst_lwl;
+wire inst_lwr;
+wire inst_swl;
+wire inst_swr;
+
+
+assign inst_bgez   = op_d[6'h01] & rt_d[5'h01];
+assign inst_bgtz   = op_d[6'h07] & rt_d[5'h00];
+assign inst_blez   = op_d[6'h06] & rt_d[5'h00];
+assign inst_bltz   = op_d[6'h01] & rt_d[5'h00];
+assign inst_j      = op_d[6'h02];
+assign inst_bltzal = op_d[6'h01] & rt_d[5'h10];
+assign inst_bgezal = op_d[6'h01] & rt_d[5'h11];
+assign inst_jalr   = op_d[6'h00] & func_d[6'h09] & rt_d[5'h00] & sa_d[5'h00];
+
+assign inst_lb     = op_d[6'h20];
+assign inst_lbu    = op_d[6'h24];
+assign inst_lh     = op_d[6'h21];
+assign inst_lhu    = op_d[6'h25];
+
+
+//------------------添加新的转移和访存类指令------------------
+
+
 assign inst_addu   = op_d[6'h00] & func_d[6'h21] & sa_d[5'h00];
 assign inst_subu   = op_d[6'h00] & func_d[6'h23] & sa_d[5'h00];
 assign inst_slt    = op_d[6'h00] & func_d[6'h2a] & sa_d[5'h00];
@@ -208,30 +312,45 @@ assign inst_bne    = op_d[6'h05];
 assign inst_jal    = op_d[6'h03];
 assign inst_jr     = op_d[6'h00] & func_d[6'h08] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
 
-assign alu_op[ 0] = inst_addu | inst_addiu | inst_lw | inst_sw | inst_jal;
-assign alu_op[ 1] = inst_subu;
-assign alu_op[ 2] = inst_slt;
-assign alu_op[ 3] = inst_sltu;
-assign alu_op[ 4] = inst_and;
+assign alu_op[ 0] = inst_addu | inst_addiu | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw | inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
+assign alu_op[ 1] = inst_subu | inst_sub;
+assign alu_op[ 2] = inst_slt  | inst_slti; 
+assign alu_op[ 3] = inst_sltu | inst_sltiu;
+assign alu_op[ 4] = inst_and  | inst_andi;
 assign alu_op[ 5] = inst_nor;
-assign alu_op[ 6] = inst_or;
-assign alu_op[ 7] = inst_xor;
-assign alu_op[ 8] = inst_sll;
-assign alu_op[ 9] = inst_srl;
-assign alu_op[10] = inst_sra;
+assign alu_op[ 6] = inst_or   | inst_ori;
+assign alu_op[ 7] = inst_xor  | inst_xori;
+assign alu_op[ 8] = inst_sll  | inst_sllv;
+assign alu_op[ 9] = inst_srl  | inst_srlv;
+assign alu_op[10] = inst_sra  | inst_srav;
 assign alu_op[11] = inst_lui;
+assign alu_op[12] = inst_mult;
+assign alu_op[13] = inst_multu;
+assign alu_op[14] = inst_div;
+assign alu_op[15] = inst_divu;
+assign alu_op[16] = inst_mfhi;//借用aluop传输，实际上不走ALU
+assign alu_op[17] = inst_mflo;//·
+assign alu_op[18] = inst_mthi;//·
+assign alu_op[19] = inst_mtlo;//·
+assign alu_op[20] = inst_lb;
+assign alu_op[21] = inst_lbu;
+assign alu_op[22] = inst_lh;
+assign alu_op[23] = inst_lhu;
 
-assign load_op      = inst_lw;//bug fixed4: load_op只有lw指令才为1
+
+
+assign load_op      = inst_lw | inst_lb | inst_lbu | inst_lhu;//bug fixed4: load_op只有lw指令才为1
 assign src1_is_sa   = inst_sll   | inst_srl | inst_sra;
-assign src1_is_pc   = inst_jal;
-assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_sw;
-assign src2_is_8    = inst_jal;
-assign res_from_mem = inst_lw;
-assign dst_is_r31   = inst_jal;
-assign dst_is_rt    = inst_addiu | inst_lui | inst_lw;
-assign gr_we        = ~inst_sw & ~inst_beq & ~inst_bne & ~inst_jr;
+assign src1_is_pc   = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
+assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu | inst_sw | inst_addi | inst_slti | inst_sltiu;
+assign src2_is_zero_extended_imm = inst_andi | inst_ori | inst_xori;
+assign src2_is_8    = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
+assign res_from_mem = inst_lw | inst_lb | inst_lbu | inst_lhu;
+assign dst_is_r31   = inst_jal   | inst_bltzal | inst_bgezal;
+assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu | inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
+assign gr_we        = ~inst_sw & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
+//jal&bltzal&bgezal指令也要写寄存器，但是不是通用寄存器，而是31号寄存器
 assign mem_we       = inst_sw;
-
 assign dest         = dst_is_r31 ? 5'd31 :
                       dst_is_rt  ? rt    : 
                                    rd;
@@ -255,19 +374,30 @@ assign rs_value = (rf_raddr1==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_
 
 assign rt_value = (rf_raddr2==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_result :
 (rf_raddr2==ms_dest && ms_gr_we)? ms_final_result :
-(rf_raddr2==rf_waddr && rf_we)? rf_wdata : rf_rdata2;
+(rf_raddr2==rf_waddr && rf_we)? rf_wdata : 
+(inst_bgez|inst_bgtz|inst_blez|inst_bltz|inst_bltzal|inst_bgezal)? 32'b0 : rf_rdata2; //因为bgez指令的rt字段是指定00001，所以这里rt_value指定为0
 
 
 
 assign rs_eq_rt = (rs_value == rt_value);
+assign rs_ge_rt = ($signed(rs_value) >= $signed(rt_value));//后续把这里改成gez和gtz
+assign rs_gt_rt = ($signed(rs_value) >  $signed(rt_value));
 assign br_taken = (   inst_beq  &&  rs_eq_rt
                    || inst_bne  && !rs_eq_rt
                    || inst_jal
                    || inst_jr
+                   || inst_j
+                   || inst_jalr
+                   || inst_bgez &&  rs_ge_rt
+                   || inst_bgtz &&  rs_gt_rt
+                   || inst_blez && !rs_gt_rt  
+                   || inst_bltz && !rs_ge_rt
+                   || inst_bltzal && !rs_ge_rt
+                   || inst_bgezal &&  rs_ge_rt
                   ) && ds_valid;
-assign br_target = (inst_beq || inst_bne) ? (fs_pc + {{14{imm[15]}}, imm[15:0], 2'b0}) :
-                   (inst_jr)              ? rs_value :
-                  /*inst_jal*/              {fs_pc[31:28], jidx[25:0], 2'b0};
-assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && inst_beq && inst_bne) || (es_res_from_mem && es_dest == rs && inst_jr); 
+assign br_target = (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz || inst_bgezal || inst_bltzal) ? (fs_pc + {{14{imm[15]}}, imm[15:0], 2'b0}) :
+                   (inst_jr || inst_jalr)              ? rs_value :
+                  /*inst_jal&inst_j*/              {fs_pc[31:28], jidx[25:0], 2'b0};
+assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz)) || (es_res_from_mem && es_dest == rs && (inst_jr || inst_jalr)); 
 
 endmodule

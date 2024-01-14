@@ -1,5 +1,5 @@
 module alu(
-  input  [11:0] alu_op,
+  input  [31:0] alu_op,
   input  [31:0] alu_src1,
   input  [31:0] alu_src2,
   output [31:0] alu_result
@@ -19,7 +19,7 @@ wire op_sra;   //��������
 wire op_lui;   //���������ڸ߰벿��
 
 // control code decomposition
-assign op_add  = alu_op[ 0];
+assign op_add  = alu_op[ 0] | alu_op[16] | alu_op[17];
 assign op_sub  = alu_op[ 1];
 assign op_slt  = alu_op[ 2];
 assign op_sltu = alu_op[ 3];
@@ -31,6 +31,9 @@ assign op_sll  = alu_op[ 8];
 assign op_srl  = alu_op[ 9];
 assign op_sra  = alu_op[10];
 assign op_lui  = alu_op[11];
+
+
+
 
 wire [31:0] add_sub_result; 
 wire [31:0] slt_result; 

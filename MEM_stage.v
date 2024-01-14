@@ -18,6 +18,7 @@ module mem_stage(
 
 reg         ms_valid;
 wire        ms_ready_go;
+wire [15:0] ms_extend_bus;
 
 reg [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus_r;
 wire        ms_res_from_mem;
@@ -25,7 +26,8 @@ wire        ms_gr_we;
 wire [ 4:0] ms_dest;
 wire [31:0] ms_alu_result;
 wire [31:0] ms_pc;
-assign {ms_res_from_mem,  //70:70
+assign {ms_extend_bus  ,  //85:71
+        ms_res_from_mem,  //70:70
         ms_gr_we       ,  //69:69
         ms_dest        ,  //68:64
         ms_alu_result  ,  //63:32
@@ -34,6 +36,14 @@ assign {ms_res_from_mem,  //70:70
 
 wire [31:0] mem_result;
 wire [31:0] ms_final_result;
+wire inst_lb;
+wire inst_lbu;
+wire inst_lh;
+wire inst_lhu;
+wire [1:0] offset;
+assign offset = ms_alu_result[1:0];
+assign {inst_lb, inst_lbu, inst_lh, inst_lhu} = ms_res_from_mem ? ms_extend_bus[3:0]
+                                                                : 4'b0;
 
 assign ms_to_ws_bus = ms_to_ws_valid ? {ms_gr_we       ,  //69:69
                        ms_dest        ,  //68:64
@@ -56,6 +66,8 @@ always @(posedge clk) begin
         es_to_ms_bus_r  = es_to_ms_bus;
     end
 end
+//lb对offset对应的那个byte进行符号扩展
+
 
 assign mem_result = data_sram_rdata;
 
