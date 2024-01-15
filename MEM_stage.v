@@ -42,8 +42,8 @@ wire inst_lh;
 wire inst_lhu;
 wire [1:0] offset;
 assign offset = ms_alu_result[1:0];
-assign {inst_lb, inst_lbu, inst_lh, inst_lhu} = ms_res_from_mem ? ms_extend_bus[3:0]
-                                                                : 4'b0;
+assign {inst_lhu,inst_lh,inst_lbu,inst_lb} = ms_res_from_mem ? ms_extend_bus[3:0]
+                                                                : 4'b0; //lb lbu lh lhu用extend_bus的低4位表示
 
 assign ms_to_ws_bus = ms_to_ws_valid ? {ms_gr_we       ,  //69:69
                        ms_dest        ,  //68:64
@@ -68,10 +68,35 @@ always @(posedge clk) begin
 end
 //lb对offset对应的那个byte进行符号扩展
 
+wire [7:0] mem_extend_result_byte;
+wire [15:0] mem_extend_result_half;
+wire [31:0] mem_signed_extend_result_byte;
+wire [31:0] mem_unsigned_extend_result_byte;
+wire [31:0] mem_signed_extend_result_half;
+wire [31:0] mem_unsigned_extend_result_half;
+
+assign mem_extend_result_byte = offset==2'b00 ? data_sram_rdata[7:0]:
+                                offset==2'b01 ? data_sram_rdata[15:8]:
+                                offset==2'b10 ? data_sram_rdata[23:16]:
+                                                data_sram_rdata[31:24];
+assign mem_extend_result_half = offset==2'b00 ? data_sram_rdata[15:0]:
+                                offset==2'b01 ? data_sram_rdata[23:8]:
+                                offset==2'b10 ? data_sram_rdata[31:16]:
+                                                data_sram_rdata[15:0];
+                                                
+assign mem_signed_extend_result_byte = { {24{mem_extend_result_byte[7]}}, mem_extend_result_byte[7:0]};
+assign mem_unsigned_extend_result_byte = { {24{1'b0}}, mem_extend_result_byte[7:0]};
+
+assign mem_signed_extend_result_half = { {16{mem_extend_result_half[15]}}, mem_extend_result_half[15:0]};
+assign mem_unsigned_extend_result_half = { {16{1'b0}}, mem_extend_result_half[15:0]};
 
 assign mem_result = data_sram_rdata;
 
-assign ms_final_result = ms_res_from_mem ? mem_result
+assign ms_final_result = ms_res_from_mem&inst_lb ? mem_signed_extend_result_byte:
+                         ms_res_from_mem&inst_lbu ? mem_unsigned_extend_result_byte:
+                         ms_res_from_mem&inst_lh ? mem_signed_extend_result_half:
+                         ms_res_from_mem&inst_lhu ? mem_unsigned_extend_result_half:
+                         ms_res_from_mem? mem_result
                                          : ms_alu_result;
 
 endmodule

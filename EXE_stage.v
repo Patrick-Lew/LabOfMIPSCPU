@@ -63,7 +63,7 @@ wire [15:0] es_extend_bus;
 
 wire        es_res_from_mem;
 
-assign es_extend_bus[3:0] = es_load_op ? es_alu_op[23:20] : 16'h0000;//lb lbu lh lhu
+assign es_extend_bus[3:0] = es_load_op ? es_alu_op[23:20] : 16'h0000;
 
 assign es_res_from_mem = es_load_op;
 assign es_to_ms_bus = es_to_ms_valid ? {es_extend_bus,//85:71
@@ -229,11 +229,21 @@ wire es_inst_is_mtlo = es_alu_op[19];
 //                        es_alu_result;
 
 
+//-----------------------store部件------------------------
+wire es_inst_is_sb;
+wire es_inst_is_sh;
+assign {es_inst_is_sb, es_inst_is_sh} =es_mem_we ?  es_alu_op[25:24] : 2'b00;//sb sh
+wire [31:0] es_write_data = es_inst_is_sb? {4{es_alu_src2[7:0]}} :
+                            es_inst_is_sh? {2{es_alu_src2[15:0]}} :
+                            es_rt_value;
+
+
+
 
 // data sram interface，EXE发送，MEM执行/接收
 assign data_sram_en    = 1'b1;
 assign data_sram_wen   = es_mem_we&&es_valid ? 4'hf : 4'h0;
 assign data_sram_addr  = es_alu_result;
-assign data_sram_wdata = es_rt_value;
+assign data_sram_wdata = es_rt_value;//先还原看一下
 
 endmodule

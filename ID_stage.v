@@ -133,9 +133,11 @@ assign ms_final_result = ms_to_ws_bus[63:32];
 wire is_i_instr;
 wire is_r_instr;
 wire is_j_instr;//is_j_instr单独处理
+wire is_mem_instr;
 
 assign is_i_instr = op[5:3] == 3'b001;
 assign is_r_instr = op[5:0] == 6'b000000;
+assign is_mem_instr = op[5:4] == 2'b10;
 
 
 assign br_bus       = {br_stall,br_taken,br_target};
@@ -160,6 +162,7 @@ assign ds_to_es_bus = {alu_op      ,  //156:125
 assign ds_ready_go    = fs_to_ds_bus_r==0 ? 1 : !(
                          (es_res_from_mem && is_r_instr && (es_dest==rs || es_dest == rt))
                         || (es_res_from_mem && is_i_instr && es_dest==rs)
+                        || (es_res_from_mem && is_mem_instr && es_dest==rs)
                         );
 assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin; //用assign连线保证所有的逐渐互锁在一个周期内完成
 assign ds_to_es_valid = ds_valid && ds_ready_go;
@@ -288,6 +291,10 @@ assign inst_lbu    = op_d[6'h24];
 assign inst_lh     = op_d[6'h21];
 assign inst_lhu    = op_d[6'h25];
 
+assign inst_sb     = op_d[6'h28];
+assign inst_sh     = op_d[6'h29];
+
+
 
 //------------------添加新的转移和访存类指令------------------
 
@@ -312,7 +319,7 @@ assign inst_bne    = op_d[6'h05];
 assign inst_jal    = op_d[6'h03];
 assign inst_jr     = op_d[6'h00] & func_d[6'h08] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
 
-assign alu_op[ 0] = inst_addu | inst_addiu | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw | inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
+assign alu_op[ 0] = inst_addu | inst_addiu | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw |inst_sb |inst_sh| inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
 assign alu_op[ 1] = inst_subu | inst_sub;
 assign alu_op[ 2] = inst_slt  | inst_slti; 
 assign alu_op[ 3] = inst_sltu | inst_sltiu;
@@ -336,21 +343,23 @@ assign alu_op[20] = inst_lb;
 assign alu_op[21] = inst_lbu;
 assign alu_op[22] = inst_lh;
 assign alu_op[23] = inst_lhu;
+assign alu_op[24] = inst_sb;
+assign alu_op[25] = inst_sh;
 
 
 
-assign load_op      = inst_lw | inst_lb | inst_lbu | inst_lhu;//bug fixed4: load_op只有lw指令才为1
+assign load_op      = inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu;//bug fixed4: load_op只有lw指令才为1
 assign src1_is_sa   = inst_sll   | inst_srl | inst_sra;
 assign src1_is_pc   = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
-assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu | inst_sw | inst_addi | inst_slti | inst_sltiu;
+assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu| inst_lh | inst_sw | inst_addi | inst_slti | inst_sltiu;
 assign src2_is_zero_extended_imm = inst_andi | inst_ori | inst_xori;
 assign src2_is_8    = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
-assign res_from_mem = inst_lw | inst_lb | inst_lbu | inst_lhu;
+assign res_from_mem = inst_lw | inst_lb | inst_lbu | inst_lhu | inst_lh;
 assign dst_is_r31   = inst_jal   | inst_bltzal | inst_bgezal;
-assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu | inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
-assign gr_we        = ~inst_sw & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
+assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu |inst_lh| inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
+assign gr_we        = ~inst_sw &~inst_sb &~inst_sh & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
 //jal&bltzal&bgezal指令也要写寄存器，但是不是通用寄存器，而是31号寄存器
-assign mem_we       = inst_sw;
+assign mem_we       = inst_sw | inst_sb | inst_sh;
 assign dest         = dst_is_r31 ? 5'd31 :
                       dst_is_rt  ? rt    : 
                                    rd;
@@ -367,6 +376,7 @@ regfile u_regfile(
     .waddr  (rf_waddr ),
     .wdata  (rf_wdata )
     );
+
 
 assign rs_value = (rf_raddr1==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_result :
 (rf_raddr1==ms_dest && ms_gr_we)? ms_final_result :
@@ -398,6 +408,6 @@ assign br_taken = (   inst_beq  &&  rs_eq_rt
 assign br_target = (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz || inst_bgezal || inst_bltzal) ? (fs_pc + {{14{imm[15]}}, imm[15:0], 2'b0}) :
                    (inst_jr || inst_jalr)              ? rs_value :
                   /*inst_jal&inst_j*/              {fs_pc[31:28], jidx[25:0], 2'b0};
-assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz)) || (es_res_from_mem && es_dest == rs && (inst_jr || inst_jalr)); 
+assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz )) || (es_res_from_mem && es_dest == rs && (inst_jr || inst_jalr || inst_bgezal || inst_bltzal)); 
 
 endmodule
