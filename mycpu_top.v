@@ -38,6 +38,7 @@ wire [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus; //EXE stage到MEM stage的总线，71
 wire [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus; //MEM stage到WB stage的总线，70位
 wire [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus; //WB stage到RF的总线，38位
 wire [`BR_BUS_WD       -1:0] br_bus;//branch相关的总线，32位
+wire [5:0] ext_int = 5'b0; //ADD：新增ext_int,假设。
 
 // IF stage
 if_stage if_stage(
@@ -117,6 +118,7 @@ mem_stage mem_stage(
 wb_stage wb_stage(
     .clk            (clk            ),
     .reset          (reset          ),
+    .ext_int        (ext_int        ),
     //allowin
     .ws_allowin     (ws_allowin     ),
     //from ms

@@ -36,6 +36,7 @@ assign {ds_inst,
 wire        rf_we   ;
 wire [ 4:0] rf_waddr;
 wire [31:0] rf_wdata;
+
 assign {rf_we   ,  //37:37
         rf_waddr,  //36:32
         rf_wdata   //31:0
@@ -121,6 +122,7 @@ wire ms_gr_we;
 wire [ 4:0] ms_dest;
 wire [31:0] ms_final_result;
 
+
 assign ms_gr_we        = ms_to_ws_bus[69];
 assign ms_dest         = ms_to_ws_bus[68:64];
 assign ms_final_result = ms_to_ws_bus[63:32];
@@ -160,10 +162,11 @@ assign ds_to_es_bus = {alu_op      ,  //156:125
                       };
 
 assign ds_ready_go    = fs_to_ds_bus_r==0 ? 1 : !(
-                         (es_res_from_mem && is_r_instr && (es_dest==rs || es_dest == rt))
+                         (es_res_from_mem && is_r_instr|inst_lwl|inst_lwr && (es_dest==rs || es_dest == rt))
                         || (es_res_from_mem && is_i_instr && es_dest==rs)
                         || (es_res_from_mem && is_mem_instr && es_dest==rs)
-                        );
+                        ); //这里只有load指令会暂停，因为load指令需要等待访存结果，其他指令都不会暂停
+
 assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin; //用assign连线保证所有的逐渐互锁在一个周期内完成
 assign ds_to_es_valid = ds_valid && ds_ready_go;
 always @(posedge clk) begin
@@ -294,9 +297,28 @@ assign inst_lhu    = op_d[6'h25];
 assign inst_sb     = op_d[6'h28];
 assign inst_sh     = op_d[6'h29];
 
+assign inst_lwl    = op_d[6'h22];
+assign inst_lwr    = op_d[6'h26];
+assign inst_swl    = op_d[6'h2a];
+assign inst_swr    = op_d[6'h2e];
+
 
 
 //------------------添加新的转移和访存类指令------------------
+
+//------------------添加中断与特权指令------------------
+wire inst_mfc0;
+wire inst_mtc0;
+wire inst_eret;
+wire syscall;
+
+assign inst_mfc0   = op_d[6'h10] & rs_d[5'h00] & sa_d[5'h00];
+assign inst_mtc0   = op_d[6'h10] & rs_d[5'h04] & sa_d[5'h00];
+assign inst_eret   = op_d[6'h10] & rs_d[5'h10] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
+
+assign syscall     = op_d[6'h00] & func_d[6'h0c];
+
+//------------------添加中断与特权指令------------------
 
 
 assign inst_addu   = op_d[6'h00] & func_d[6'h21] & sa_d[5'h00];
@@ -319,7 +341,7 @@ assign inst_bne    = op_d[6'h05];
 assign inst_jal    = op_d[6'h03];
 assign inst_jr     = op_d[6'h00] & func_d[6'h08] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
 
-assign alu_op[ 0] = inst_addu | inst_addiu | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw |inst_sb |inst_sh| inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
+assign alu_op[ 0] = inst_addu | inst_addiu | inst_lwl | inst_lwr | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw |inst_swr|inst_swl|inst_sb |inst_sh| inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
 assign alu_op[ 1] = inst_subu | inst_sub;
 assign alu_op[ 2] = inst_slt  | inst_slti; 
 assign alu_op[ 3] = inst_sltu | inst_sltiu;
@@ -345,21 +367,25 @@ assign alu_op[22] = inst_lh;
 assign alu_op[23] = inst_lhu;
 assign alu_op[24] = inst_sb;
 assign alu_op[25] = inst_sh;
+assign alu_op[26] = inst_lwl;
+assign alu_op[27] = inst_lwr;
+assign alu_op[28] = inst_swl;
+assign alu_op[29] = inst_swr;
 
 
 
-assign load_op      = inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu;//bug fixed4: load_op只有lw指令才为1
+assign load_op      = inst_lwr   | inst_lwl | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu;//bug fixed4: load_op只有lw指令才为1
 assign src1_is_sa   = inst_sll   | inst_srl | inst_sra;
 assign src1_is_pc   = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
-assign src2_is_imm  = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu| inst_lh | inst_sw | inst_addi | inst_slti | inst_sltiu;
+assign src2_is_imm  = inst_addiu | inst_lui | inst_lwr   | inst_lwl | inst_lw | inst_lb | inst_lbu | inst_lhu| inst_lh | inst_sw |inst_sb | inst_sh | inst_swr | inst_swl | inst_addi | inst_slti | inst_sltiu;
 assign src2_is_zero_extended_imm = inst_andi | inst_ori | inst_xori;
-assign src2_is_8    = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
-assign res_from_mem = inst_lw | inst_lb | inst_lbu | inst_lhu | inst_lh;
+assign src2_is_8    = inst_jal   | inst_jalr | inst_bltzal | inst_bgezal;
+assign res_from_mem = inst_lw    | inst_lwr  | inst_lwl | inst_lb | inst_lbu | inst_lhu | inst_lh;
 assign dst_is_r31   = inst_jal   | inst_bltzal | inst_bgezal;
-assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lb | inst_lbu | inst_lhu |inst_lh| inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
-assign gr_we        = ~inst_sw &~inst_sb &~inst_sh & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
+assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lwr  | inst_lwl | inst_lb | inst_lbu | inst_lhu |inst_lh| inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
+assign gr_we        = ~inst_sw &~inst_sb &~inst_sh &~inst_swr &~inst_swl & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
 //jal&bltzal&bgezal指令也要写寄存器，但是不是通用寄存器，而是31号寄存器
-assign mem_we       = inst_sw | inst_sb | inst_sh;
+assign mem_we       = inst_sw | inst_sb | inst_sh | inst_swr |inst_swl;
 assign dest         = dst_is_r31 ? 5'd31 :
                       dst_is_rt  ? rt    : 
                                    rd;
@@ -377,7 +403,8 @@ regfile u_regfile(
     .wdata  (rf_wdata )
     );
 
-
+//------------------------by-pass------------------------
+//只负责传递，不负责暂停
 assign rs_value = (rf_raddr1==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_result :
 (rf_raddr1==ms_dest && ms_gr_we)? ms_final_result :
 (rf_raddr1==rf_waddr && rf_we)? rf_wdata : rf_rdata1;
@@ -388,7 +415,7 @@ assign rt_value = (rf_raddr2==es_dest && !es_res_from_mem && es_gr_we) ? es_alu_
 (inst_bgez|inst_bgtz|inst_blez|inst_bltz|inst_bltzal|inst_bgezal)? 32'b0 : rf_rdata2; //因为bgez指令的rt字段是指定00001，所以这里rt_value指定为0
 
 
-
+//------------------------分支跳转------------------------
 assign rs_eq_rt = (rs_value == rt_value);
 assign rs_ge_rt = ($signed(rs_value) >= $signed(rt_value));//后续把这里改成gez和gtz
 assign rs_gt_rt = ($signed(rs_value) >  $signed(rt_value));

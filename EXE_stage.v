@@ -64,9 +64,12 @@ wire [15:0] es_extend_bus;
 wire        es_res_from_mem;
 
 assign es_extend_bus[3:0] = es_load_op ? es_alu_op[23:20] : 16'h0000;
+assign es_extend_bus[5:4] = es_load_op ? es_alu_op[27:26] : 2'b00;//lwr lwl
 
 assign es_res_from_mem = es_load_op;
-assign es_to_ms_bus = es_to_ms_valid ? {es_extend_bus,//85:71
+
+assign es_to_ms_bus = es_to_ms_valid ? {es_rt_value   ,  //  118:87
+                       es_extend_bus,//86:71
                        es_res_from_mem,  //70:70
                        es_gr_we       ,  //69:69
                        es_dest        ,  //68:64
@@ -232,18 +235,58 @@ wire es_inst_is_mtlo = es_alu_op[19];
 //-----------------------store部件------------------------
 wire es_inst_is_sb;
 wire es_inst_is_sh;
-assign {es_inst_is_sb, es_inst_is_sh} =es_mem_we ?  es_alu_op[25:24] : 2'b00;//sb sh
-wire [31:0] es_write_data = es_inst_is_sb? {4{es_alu_src2[7:0]}} :
-                            es_inst_is_sh? {2{es_alu_src2[15:0]}} :
+wire es_inst_is_lwl;
+wire es_inst_is_lwr;
+wire es_inst_is_swl;
+wire es_inst_is_swr;
+wire [31:0] write_data_swlr;
+wire [3:0] byte_wen;
+
+
+assign {es_inst_is_sh, es_inst_is_sb} = es_mem_we ?  es_alu_op[25:24] : 2'b00;//sb sh
+
+//-----------------------load部件------------------------
+
+
+assign { es_inst_is_lwr, es_inst_is_lwl} = es_load_op ? es_alu_op[27:26] : 4'b00;//lwl lwr
+assign {es_inst_is_swr, es_inst_is_swl}  = es_mem_we ?  es_alu_op[29:28] : 4'b00;//swr swl 
+
+assign byte_wen = es_inst_is_sb&es_alu_result[1:0]==2'b00 ? 4'b0001 :
+                  es_inst_is_sb&es_alu_result[1:0]==2'b01 ? 4'b0010 :
+                  es_inst_is_sb&es_alu_result[1:0]==2'b10 ? 4'b0100 :
+                  es_inst_is_sb&es_alu_result[1:0]==2'b11 ? 4'b1000 :
+                  es_inst_is_sh&es_alu_result[1:0]==2'b00 ? 4'b0011 :
+                  es_inst_is_sh&es_alu_result[1:0]==2'b01 ? 4'b0111 ://例外
+                  es_inst_is_sh&es_alu_result[1:0]==2'b10 ? 4'b1100 :
+                  es_inst_is_sh&es_alu_result[1:0]==2'b11 ? 4'b1110 ://例外
+                  es_inst_is_swl&es_alu_result[1:0]==2'b00 ? 4'b0001:
+                  es_inst_is_swl&es_alu_result[1:0]==2'b01 ? 4'b0011:
+                  es_inst_is_swl&es_alu_result[1:0]==2'b10 ? 4'b0111:
+                  es_inst_is_swr&es_alu_result[1:0]==2'b11 ? 4'b1000:
+                  es_inst_is_swr&es_alu_result[1:0]==2'b10 ? 4'b1100:
+                  es_inst_is_swr&es_alu_result[1:0]==2'b01 ? 4'b1110:
+                  4'b1111; //sh有例外情况，这里先不考虑，允许通行
+
+assign write_data_swlr = byte_wen==4'b1000 ? {es_rt_value[7:0],24'b0}:
+                         byte_wen==4'b1100 ? {es_rt_value[15:0], 16'b0} :
+                        byte_wen==4'b1110 ? {es_rt_value[23:0], 8'b0} :
+                        byte_wen==4'b0001 ? {24'b0,es_rt_value[31:24]}:
+                        byte_wen==4'b0011 ? {16'b0,es_rt_value[31:16]}:
+                        byte_wen==4'b0111 ? {8'b0 ,es_rt_value[31:8]}:
+                        byte_wen==4'b1111 ? es_rt_value:
+                        byte_wen==32'b0;
+                                
+wire [31:0] es_write_data = es_inst_is_sb? {4{es_rt_value[7:0]}} :
+                            es_inst_is_sh? {2{es_rt_value[15:0]}} :
+                            es_inst_is_swl|es_inst_is_swr ? write_data_swlr:
                             es_rt_value;
-
-
 
 
 // data sram interface，EXE发送，MEM执行/接收
 assign data_sram_en    = 1'b1;
-assign data_sram_wen   = es_mem_we&&es_valid ? 4'hf : 4'h0;
-assign data_sram_addr  = es_alu_result;
-assign data_sram_wdata = es_rt_value;//先还原看一下
+assign data_sram_wen   = es_mem_we&&es_valid&&(es_inst_is_sb|es_inst_is_sh|es_inst_is_swl|es_inst_is_swr) ? byte_wen:
+                          es_mem_we&&es_valid? 4'hf : 4'h0;
+assign data_sram_addr  = es_inst_is_lwr|es_inst_is_lwl ? {es_alu_result[31:2],2'b00} : es_alu_result;
+assign data_sram_wdata = es_write_data;//先还原看一下
 
 endmodule
