@@ -16,7 +16,9 @@ module exe_stage(
     output        data_sram_en   ,
     output [ 3:0] data_sram_wen  ,
     output [31:0] data_sram_addr ,
-    output [31:0] data_sram_wdata
+    output [31:0] data_sram_wdata,
+    input [`CP0_OUT_BUS_WIDTH - 1:0] cp0_to_es_bus,
+    input [`MS_TO_WS_BUS_WD -1:0]  ms_to_ws_bus
 );
 
 
@@ -40,7 +42,19 @@ wire [15:0] es_imm        ;
 wire [31:0] es_rs_value   ;
 wire [31:0] es_rt_value   ;
 wire [31:0] es_pc         ;
-assign {es_alu_op      ,  //156:125 
+wire [4:0]  es_rd         ;
+wire [2:0]  es_sel        ;
+wire [6:0]  exception_bus_es;
+wire [15:0] es_extend_bus_from_ds;
+wire [18:0] exception_bus_from_ms;
+assign exception_bus_from_ms = ms_to_ws_bus[92:74];
+wire ms_to_ws_ex = exception_bus_from_ms[6];
+
+assign {exception_bus_es,
+        es_sel,
+        es_rd,
+        es_extend_bus_from_ds,
+        es_alu_op      ,  //156:125 
         es_load_op     ,  //123:123 +1
         es_src1_is_sa  ,  //122:122 +1
         es_src1_is_pc  ,  //121:121 +1
@@ -56,10 +70,20 @@ assign {es_alu_op      ,  //156:125
         es_pc             //31 :0
        } = ds_to_es_bus_r;
 
+//CP0_in_bus
+wire CP0_status_exl;
+wire CP0_cause_ti;
+wire eret_flush;
+wire [31:0] CP0_epc;
+wire ws_ex;
+
+assign {ws_ex,CP0_status_exl, CP0_cause_ti, eret_flush, CP0_epc} = cp0_to_es_bus;
+
 wire [31:0] es_alu_src1   ;
 wire [31:0] es_alu_src2   ;
 wire [31:0] es_alu_result ;
-wire [15:0] es_extend_bus;
+wire [15:0] es_extend_bus ;
+wire es_gr_we_mux_exception;
 
 wire        es_res_from_mem;
 
@@ -67,8 +91,10 @@ assign es_extend_bus[3:0] = es_load_op ? es_alu_op[23:20] : 16'h0000;
 assign es_extend_bus[5:4] = es_load_op ? es_alu_op[27:26] : 2'b00;//lwr lwl
 
 assign es_res_from_mem = es_load_op;
-
-assign es_to_ms_bus = es_to_ms_valid ? {es_rt_value   ,  //  118:87
+wire [18:0] CP0_bus_es_to_ms;
+assign es_to_ms_bus = eret_flush ? 0 :
+                       es_to_ms_valid ? { CP0_bus_es_to_ms,//137:119
+                       es_rt_value   ,  //  118:87
                        es_extend_bus,//86:71
                        es_res_from_mem,  //70:70
                        es_gr_we       ,  //69:69
@@ -99,17 +125,21 @@ assign es_alu_src1 = es_src1_is_sa  ? {27'b0, es_imm[10:6]} :
                      es_src1_is_pc  ? es_pc[31:0] :
                      es_inst_is_mfhi ? HI :
                      es_inst_is_mflo ? LO :
+                     es_inst_is_mtc0 ? 32'b0 :
                                       es_rs_value;
 assign es_alu_src2 = es_src2_is_imm ? {{16{es_imm[15]}}, es_imm[15:0]} : 
                      es_src2_is_8   ? 32'd8 :
                      es_src2_is_zero_extended_imm ? {{16{1'b0}}, es_imm[15:0]} : //添加0拓展
                      es_rt_value;
 
+wire overflow;
+
 alu u_alu(
     .alu_op     (es_alu_op    ),
     .alu_src1   (es_alu_src1  ), //bug fixed2: es_alu_src1
     .alu_src2   (es_alu_src2  ),
-    .alu_result (es_alu_result)
+    .alu_result (es_alu_result),
+    .overflow   (overflow     )
     );
 
 //------------------------乘除法部件------------------------
@@ -169,9 +199,9 @@ always @(posedge clk ) begin
         s_axis_dividend_tvalid <= ds_to_es_bus[125+14]|| ds_to_es_bus[125+15];
 
 
-        if (es_inst_is_mthi ) begin
+        if (es_inst_is_mthi && ~ws_ex) begin
             HI <= es_rs_value;
-        end else if (es_inst_is_mtlo ) begin
+        end else if (es_inst_is_mtlo && ~ws_ex ) begin
             LO <= es_rs_value;
         end
 
@@ -182,10 +212,10 @@ always @(posedge clk ) begin
         s_axis_dividend_tvalid <= 1'b0;
     end
 
-    if (es_inst_is_mult || es_inst_is_multu) begin
+    if ((es_inst_is_mult || es_inst_is_multu) && (~ws_ex) && (~ms_to_ws_ex)) begin
         HI <= hi_result;
         LO <= lo_result;
-    end else if ((m_axis_dout_tvalid_signed & es_inst_is_div)|| (m_axis_dout_tvalid_unsigned & es_inst_is_divu )) begin
+    end else if (~ws_ex && ((m_axis_dout_tvalid_signed & es_inst_is_div)|| (m_axis_dout_tvalid_unsigned & es_inst_is_divu ))) begin
         HI <= hi_result;
         LO <= lo_result;
     end 
@@ -280,13 +310,59 @@ wire [31:0] es_write_data = es_inst_is_sb? {4{es_rt_value[7:0]}} :
                             es_inst_is_sh? {2{es_rt_value[15:0]}} :
                             es_inst_is_swl|es_inst_is_swr ? write_data_swlr:
                             es_rt_value;
-
+//-----------------------store部件------------------------
 
 // data sram interface，EXE发送，MEM执行/接收
 assign data_sram_en    = 1'b1;
-assign data_sram_wen   = es_mem_we&&es_valid&&(es_inst_is_sb|es_inst_is_sh|es_inst_is_swl|es_inst_is_swr) ? byte_wen:
+assign data_sram_wen   =  es_to_ms_excode == `EXCODE_ADES || ms_to_ws_ex ? 4'b0 :
+                          es_mem_we&&es_valid&&(es_inst_is_sb|es_inst_is_sh|es_inst_is_swl|es_inst_is_swr) ? byte_wen:
                           es_mem_we&&es_valid? 4'hf : 4'h0;
 assign data_sram_addr  = es_inst_is_lwr|es_inst_is_lwl ? {es_alu_result[31:2],2'b00} : es_alu_result;
 assign data_sram_wdata = es_write_data;//先还原看一下
+
+
+//-----------------------CP0部件------------------------
+wire es_inst_is_mtc0 = es_rd && (!es_gr_we);
+wire es_inst_is_mtf0 = es_rd && es_gr_we;
+wire es_inst_is_eret = es_alu_op[30];
+wire es_inst_is_syscall = es_alu_op[31];
+wire es_ex;
+wire es_bd;
+wire [4:0] es_excode;
+wire es_to_ms_ex;
+wire es_to_ms_bd;
+wire [4:0] es_to_ms_excode;
+wire ades;
+wire es_inst_is_add;
+wire es_inst_is_addi;
+wire es_inst_is_sub;
+wire overflow_error;
+
+//assign es_gr_we_mux_exception = es_to_ms_excode == `EXCODE_OVF ? 1'b0 :
+//                               es_gr_we;
+
+assign {es_inst_is_sub,es_inst_is_addi,es_inst_is_add} = es_extend_bus_from_ds[2:0];
+
+assign overflow_error = (es_inst_is_sub|es_inst_is_addi|es_inst_is_add) & overflow;
+
+assign ades = es_mem_we & es_inst_is_sh & (es_alu_result[0]!=1'b0)? 1'b1 :
+              es_mem_we & (~es_inst_is_swl &~es_inst_is_swr &~es_inst_is_sh &~es_inst_is_sb) & (es_alu_result[1:0]!=2'b00)? 1'b1 
+              : 1'b0; //这里的例外情况是sh指令的最低位不为0，或者sw的最低两位不为0，后期可以传一个sw的指明位过来，就不用这么麻烦判断了
+
+assign es_to_ms_ex = es_ex ? es_ex: 
+        ades? 1'b1:
+        overflow_error? 1'b1:
+        1'b0;
+assign es_to_ms_bd = es_bd;
+assign es_to_ms_excode = es_ex? es_excode:
+        ades? `EXCODE_ADES:
+        overflow_error? `EXCODE_OVF:
+        5'b0;
+
+
+
+assign {es_ex, es_bd, es_excode} = exception_bus_es;
+
+assign CP0_bus_es_to_ms = {es_inst_is_mtc0, es_inst_is_mtf0, es_inst_is_eret, es_inst_is_syscall ,es_rd ,es_sel , es_to_ms_ex, es_to_ms_bd, es_to_ms_excode};//1+1+1+1+5+3+1+1+5=19
 
 endmodule

@@ -18,7 +18,8 @@ module id_stage(
     input  [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus  ,
     //bypass input
     input  [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus  ,
-    input  [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus
+    input  [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus  ,
+    input [`CP0_OUT_BUS_WIDTH - 1:0] cp0_to_ds_bus
 );
 
 reg         ds_valid   ;
@@ -30,7 +31,10 @@ assign fs_pc = fs_to_ds_bus[31:0];
 
 wire [31:0] ds_inst;
 wire [31:0] ds_pc  ;
-assign {ds_inst,
+wire ds_ex;
+wire ds_bd;
+wire [4:0] ds_excode;
+assign {ds_ex, ds_bd, ds_excode, ds_inst,
         ds_pc  } = fs_to_ds_bus_r;
 
 wire        rf_we   ;
@@ -41,6 +45,16 @@ assign {rf_we   ,  //37:37
         rf_waddr,  //36:32
         rf_wdata   //31:0
        } = ws_to_rf_bus;
+
+//CP0_in_bus
+wire CP0_status_exl;
+wire CP0_cause_ti;
+wire eret_flush;
+wire [31:0] CP0_epc;
+wire ws_ex;
+
+assign {ws_ex,CP0_status_exl, CP0_cause_ti, eret_flush, CP0_epc} = cp0_to_ds_bus;
+
 
 wire        br_stall; //ADD：新增br_stall
 wire        br_taken;
@@ -60,6 +74,8 @@ wire [ 4:0] dest;
 wire [15:0] imm;
 wire [31:0] rs_value;
 wire [31:0] rt_value;
+wire [ 4:0] ds_rd;
+wire [ 2:0] sel;
 
 wire [ 5:0] op;
 wire [ 4:0] rs;
@@ -112,7 +128,15 @@ wire es_res_from_mem;
 wire es_gr_we;
 wire [ 4:0] es_dest;
 wire [31:0] es_alu_result;
+wire es_inst_is_mtc0;
+wire es_inst_is_mfc0;
+wire es_ex;
+wire es_eret;
 
+assign es_inst_is_mtc0 = es_to_ms_bus[137];//这里可以再把rd引出来作为更精密的判断
+assign es_inst_is_mfc0 = es_to_ms_bus[136];//can be fined
+assign es_eret         = es_to_ms_bus[135];
+assign es_ex = es_to_ms_bus [125];
 assign es_res_from_mem = es_to_ms_bus[70];
 assign es_gr_we        = es_to_ms_bus[69];
 assign es_dest         = es_to_ms_bus[68:64];
@@ -121,8 +145,15 @@ assign es_alu_result   = es_to_ms_bus[63:32];
 wire ms_gr_we;
 wire [ 4:0] ms_dest;
 wire [31:0] ms_final_result;
+wire ms_inst_is_mtc0;
+wire ms_inst_is_mfc0;
+wire ms_ex;
+wire ms_eret;
 
-
+assign ms_inst_is_mtc0 = ms_to_ws_bus[92];//这里可以再把rd引出来作为更精密的判断
+assign ms_inst_is_mfc0 = ms_to_ws_bus[91];//can be fined
+assign ms_eret         = ms_to_ws_bus[90];
+assign ms_ex = ms_to_ws_bus [80];
 assign ms_gr_we        = ms_to_ws_bus[69];
 assign ms_dest         = ms_to_ws_bus[68:64];
 assign ms_final_result = ms_to_ws_bus[63:32];
@@ -136,16 +167,24 @@ wire is_i_instr;
 wire is_r_instr;
 wire is_j_instr;//is_j_instr单独处理
 wire is_mem_instr;
+wire [15:0] extend_bus_from_ds_es;
+
+wire is_bd_inst;
 
 assign is_i_instr = op[5:3] == 3'b001;
 assign is_r_instr = op[5:0] == 6'b000000;
 assign is_mem_instr = op[5:4] == 2'b10;
 
 
-assign br_bus       = {br_stall,br_taken,br_target};
+assign br_bus       = eret_flush? 0 :{is_bd_inst,br_stall,br_taken,br_target};
 
 
-assign ds_to_es_bus = {alu_op      ,  //156:125
+assign ds_to_es_bus = eret_flush? 0 :
+                    {  exception_bus_ds_to_es, //171:165
+                       sel         ,  //164:162
+                       ds_rd          ,  //161:157
+                       extend_bus_from_ds_es,
+                       alu_op      ,  //156:125
                        load_op     ,  //124:124
                        src1_is_sa  ,  //123:123
                        src1_is_pc  ,  //122:122
@@ -161,10 +200,17 @@ assign ds_to_es_bus = {alu_op      ,  //156:125
                        ds_pc          //31 :0
                       };
 
+//------------------------stall-----------------------
 assign ds_ready_go    = fs_to_ds_bus_r==0 ? 1 : !(
                          (es_res_from_mem && is_r_instr|inst_lwl|inst_lwr && (es_dest==rs || es_dest == rt))
                         || (es_res_from_mem && is_i_instr && es_dest==rs)
                         || (es_res_from_mem && is_mem_instr && es_dest==rs)
+                        || (es_inst_is_mtc0 && inst_mfc0)
+                        || (ms_inst_is_mtc0 && inst_mfc0)
+                        || (es_inst_is_mfc0 && (es_dest==rs || es_dest == rt))
+                        || (ms_inst_is_mfc0 && (ms_dest==rs || ms_dest == rt))
+                        || (es_ex|ms_ex)
+                        || (es_eret|ms_eret)
                         ); //这里只有load指令会暂停，因为load指令需要等待访存结果，其他指令都不会暂停
 
 assign ds_allowin     = !ds_valid || ds_ready_go && es_allowin; //用assign连线保证所有的逐渐互锁在一个周期内完成
@@ -180,6 +226,10 @@ always @(posedge clk) begin
     if (fs_to_ds_valid && ds_allowin) begin//IF送来的数据有效，且ID允许进入
         fs_to_ds_bus_r <= fs_to_ds_bus; //IF stage到ID stage的总线，64位
     end
+    if (eret_flush) begin
+        fs_to_ds_bus_r <= 0;
+    end
+
 end
 
 assign op   = ds_inst[31:26];
@@ -289,6 +339,11 @@ assign inst_bltzal = op_d[6'h01] & rt_d[5'h10];
 assign inst_bgezal = op_d[6'h01] & rt_d[5'h11];
 assign inst_jalr   = op_d[6'h00] & func_d[6'h09] & rt_d[5'h00] & sa_d[5'h00];
 
+assign is_bd_inst  = inst_bgez | inst_bgtz | inst_blez | inst_bltz 
+                    | inst_bltzal | inst_bgezal | inst_j | inst_jal 
+                    | inst_jalr | inst_beq | inst_bne | inst_jr;
+
+
 assign inst_lb     = op_d[6'h20];
 assign inst_lbu    = op_d[6'h24];
 assign inst_lh     = op_d[6'h21];
@@ -310,13 +365,15 @@ assign inst_swr    = op_d[6'h2e];
 wire inst_mfc0;
 wire inst_mtc0;
 wire inst_eret;
-wire syscall;
+wire inst_syscall;
+wire inst_break;
 
 assign inst_mfc0   = op_d[6'h10] & rs_d[5'h00] & sa_d[5'h00];
 assign inst_mtc0   = op_d[6'h10] & rs_d[5'h04] & sa_d[5'h00];
 assign inst_eret   = op_d[6'h10] & rs_d[5'h10] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
 
-assign syscall     = op_d[6'h00] & func_d[6'h0c];
+assign inst_syscall   = op_d[6'h00] & func_d[6'h0c];
+assign inst_break     = op_d[6'h00] & func_d[6'h0d];
 
 //------------------添加中断与特权指令------------------
 
@@ -341,7 +398,11 @@ assign inst_bne    = op_d[6'h05];
 assign inst_jal    = op_d[6'h03];
 assign inst_jr     = op_d[6'h00] & func_d[6'h08] & rt_d[5'h00] & rd_d[5'h00] & sa_d[5'h00];
 
-assign alu_op[ 0] = inst_addu | inst_addiu | inst_lwl | inst_lwr | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | inst_sw |inst_swr|inst_swl|inst_sb |inst_sh| inst_jal | inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
+assign alu_op[ 0] = inst_mtc0 | inst_addu | inst_addiu | inst_lwl | inst_lwr | 
+                    inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu | 
+                    inst_sw |inst_swr|inst_swl|inst_sb |inst_sh| inst_jal | 
+                    inst_bltzal | inst_bgezal | inst_jalr | inst_add | inst_addi;
+
 assign alu_op[ 1] = inst_subu | inst_sub;
 assign alu_op[ 2] = inst_slt  | inst_slti; 
 assign alu_op[ 3] = inst_sltu | inst_sltiu;
@@ -371,24 +432,28 @@ assign alu_op[26] = inst_lwl;
 assign alu_op[27] = inst_lwr;
 assign alu_op[28] = inst_swl;
 assign alu_op[29] = inst_swr;
+assign alu_op[30] = inst_eret;//借用aluop传输eret指令，实际上不走ALU
+assign alu_op[31] = inst_syscall;//借用aluop传输syscall指令，实际上不走ALU
 
 
 
 assign load_op      = inst_lwr   | inst_lwl | inst_lw | inst_lb | inst_lbu | inst_lh | inst_lhu;//bug fixed4: load_op只有lw指令才为1
 assign src1_is_sa   = inst_sll   | inst_srl | inst_sra;
-assign src1_is_pc   = inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
+assign src1_is_pc   = (ds_to_es_excode == `EXCODE_ADEL) | inst_jal   | inst_jalr| inst_bltzal | inst_bgezal;
 assign src2_is_imm  = inst_addiu | inst_lui | inst_lwr   | inst_lwl | inst_lw | inst_lb | inst_lbu | inst_lhu| inst_lh | inst_sw |inst_sb | inst_sh | inst_swr | inst_swl | inst_addi | inst_slti | inst_sltiu;
 assign src2_is_zero_extended_imm = inst_andi | inst_ori | inst_xori;
 assign src2_is_8    = inst_jal   | inst_jalr | inst_bltzal | inst_bgezal;
 assign res_from_mem = inst_lw    | inst_lwr  | inst_lwl | inst_lb | inst_lbu | inst_lhu | inst_lh;
 assign dst_is_r31   = inst_jal   | inst_bltzal | inst_bgezal;
-assign dst_is_rt    = inst_addiu | inst_lui | inst_lw | inst_lwr  | inst_lwl | inst_lb | inst_lbu | inst_lhu |inst_lh| inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
-assign gr_we        = ~inst_sw &~inst_sb &~inst_sh &~inst_swr &~inst_swl & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
+assign dst_is_rt    = inst_mfc0  | inst_addiu | inst_lui | inst_lw | inst_lwr  | inst_lwl | inst_lb | inst_lbu | inst_lhu |inst_lh| inst_addi | inst_andi | inst_ori | inst_xori |inst_slti |inst_sltiu;
+assign gr_we        = ~inst_break & ~eret_flush& ~inst_syscall& ~inst_mtc0 & ~inst_sw &~inst_sb &~inst_sh &~inst_swr &~inst_swl & ~inst_beq & ~inst_bne & ~inst_jr &~inst_bgez &~inst_bgtz &~inst_blez &~inst_bltz  &~inst_j & ~inst_mult & ~inst_multu & ~inst_div & ~inst_divu & ~inst_mthi & ~inst_mtlo;//mtlo和mthi指令写的是HI和LO寄存器，不是通用寄存器
 //jal&bltzal&bgezal指令也要写寄存器，但是不是通用寄存器，而是31号寄存器
 assign mem_we       = inst_sw | inst_sb | inst_sh | inst_swr |inst_swl;
 assign dest         = dst_is_r31 ? 5'd31 :
                       dst_is_rt  ? rt    : 
                                    rd;
+assign ds_rd        = inst_mfc0|inst_mtc0 ? rd : 5'd0; //exe阶段可以用rd来判断是否是mfc0和mtc0指令，再用gr_we来判断是否写寄存器
+assign sel          = ds_inst[2:0];
 
 assign rf_raddr1 = rs;
 assign rf_raddr2 = rt;
@@ -436,5 +501,39 @@ assign br_target = (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez 
                    (inst_jr || inst_jalr)              ? rs_value :
                   /*inst_jal&inst_j*/              {fs_pc[31:28], jidx[25:0], 2'b0};
 assign br_stall  = fs_to_ds_bus_r==0 ? 0 : (es_res_from_mem && (es_dest == rs || es_dest == rt) && (inst_beq || inst_bne || inst_bgez || inst_bgtz || inst_blez || inst_bltz )) || (es_res_from_mem && es_dest == rs && (inst_jr || inst_jalr || inst_bgezal || inst_bltzal)); 
+
+//------------------------EXCEPTION------------------------
+wire ds_to_es_ex;
+wire [4:0] ds_to_es_excode;
+wire illegal_instr;
+assign illegal_instr = !(
+                        inst_addu | inst_subu | inst_slt | inst_sltu | inst_and 
+                        | inst_or | inst_xor | inst_nor | inst_sll | inst_srl 
+                        | inst_sra | inst_addiu | inst_lui | inst_lw | inst_sw 
+                        | inst_beq | inst_bne | inst_jal | inst_jr | inst_bltzal 
+                        | inst_bgezal | inst_jalr | inst_lb | inst_lbu | inst_lh 
+                        | inst_lhu | inst_sb | inst_sh | inst_lwl | inst_lwr | inst_swl 
+                        | inst_swr | inst_mfc0 | inst_mtc0 | inst_syscall | inst_break 
+                        | inst_mfhi | inst_mflo | inst_mthi | inst_mtlo | inst_mult 
+                        | inst_multu | inst_div | inst_divu | inst_eret
+                        | inst_slti | inst_sltiu | inst_andi | inst_ori | inst_xori
+                        | inst_sllv | inst_srlv | inst_srav | inst_bgez | inst_bgtz
+                        | inst_blez | inst_bltz | inst_add | inst_addi | inst_sub
+                        | inst_j
+                        );
+                    
+                    
+assign ds_to_es_ex = ds_ex? ds_ex : inst_syscall|inst_break|illegal_instr; //syscall
+assign ds_to_es_excode = ds_ex? ds_excode:
+                        inst_syscall?  `EXCODE_SYS : 
+                        inst_break  ?  `EXCODE_BP  :
+                        illegal_instr? `EXCODE_RI  :
+                        5'b00000; //syscall
+//assign alu_op[30] = inst_eret;//借用aluop传输eret指令，实际上不走ALU
+
+assign extend_bus_from_ds_es [2:0] = {inst_sub,inst_addi,inst_add};
+
+wire [6:0] exception_bus_ds_to_es;
+assign exception_bus_ds_to_es = {ds_to_es_ex, ds_bd, ds_to_es_excode}; //1+1+5=7位
 
 endmodule

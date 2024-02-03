@@ -38,7 +38,8 @@ wire [`ES_TO_MS_BUS_WD -1:0] es_to_ms_bus; //EXE stage到MEM stage的总线，71
 wire [`MS_TO_WS_BUS_WD -1:0] ms_to_ws_bus; //MEM stage到WB stage的总线，70位
 wire [`WS_TO_RF_BUS_WD -1:0] ws_to_rf_bus; //WB stage到RF的总线，38位
 wire [`BR_BUS_WD       -1:0] br_bus;//branch相关的总线，32位
-wire [5:0] ext_int = 5'b0; //ADD：新增ext_int,假设。
+wire [`CP0_OUT_BUS_WIDTH - 1:0] CP0_out_bus; //CP0相关的总线，35位
+wire [5:0] ext_int = 6'b0; //ADD：新增ext_int,假设。
 
 // IF stage
 if_stage if_stage(
@@ -56,7 +57,8 @@ if_stage if_stage(
     .inst_sram_wen  (inst_sram_wen  ),
     .inst_sram_addr (inst_sram_addr ),
     .inst_sram_wdata(inst_sram_wdata),
-    .inst_sram_rdata(inst_sram_rdata)
+    .inst_sram_rdata(inst_sram_rdata),
+    .cp0_to_fs_bus  (CP0_out_bus    )
 );
 // ID stage
 id_stage id_stage(
@@ -77,7 +79,8 @@ id_stage id_stage(
     .ws_to_rf_bus   (ws_to_rf_bus   ),
     //bypass input
     .es_to_ms_bus   (es_to_ms_bus   ),
-    .ms_to_ws_bus   (ms_to_ws_bus   )
+    .ms_to_ws_bus   (ms_to_ws_bus   ),
+    .cp0_to_ds_bus  (CP0_out_bus    )
 );
 // EXE stage
 exe_stage exe_stage(
@@ -96,7 +99,9 @@ exe_stage exe_stage(
     .data_sram_en   (data_sram_en   ),
     .data_sram_wen  (data_sram_wen  ),
     .data_sram_addr (data_sram_addr ),
-    .data_sram_wdata(data_sram_wdata)
+    .data_sram_wdata(data_sram_wdata),
+    .cp0_to_es_bus  (CP0_out_bus    ),
+    .ms_to_ws_bus   (ms_to_ws_bus   )
 );
 // MEM stage
 mem_stage mem_stage(
@@ -112,7 +117,8 @@ mem_stage mem_stage(
     .ms_to_ws_valid (ms_to_ws_valid ),
     .ms_to_ws_bus   (ms_to_ws_bus   ),
     //from data-sram
-    .data_sram_rdata(data_sram_rdata)
+    .data_sram_rdata(data_sram_rdata),
+    .cp0_to_ms_bus  (CP0_out_bus    )
 );
 // WB stage
 wb_stage wb_stage(
@@ -130,7 +136,8 @@ wb_stage wb_stage(
     .debug_wb_pc      (debug_wb_pc      ),
     .debug_wb_rf_wen  (debug_wb_rf_wen  ),
     .debug_wb_rf_wnum (debug_wb_rf_wnum ),
-    .debug_wb_rf_wdata(debug_wb_rf_wdata)
+    .debug_wb_rf_wdata(debug_wb_rf_wdata),
+    .CP0_out_bus      (CP0_out_bus      )
 );
 
 endmodule
